@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Query Benchmark Tool</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Roboto', sans-serif;
+      background: linear-gradient(to bottom right, #f0f8ff, #e6f7ff);
+      color: #333;
+      margin: 0;
+      padding: 20px;
+      min-height: 100vh;
+      overflow-y: auto;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+    }
+
+    .container {
+      background-color: #fff;
+      padding: 30px 40px;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+      max-width: 800px;
+      width: 100%;
+      animation: slideUp 0.8s ease-out;
+      margin-top: 30px;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 25px;
+      color: #2c3e50;
+    }
+
+    label {
+      display: block;
+      font-weight: bold;
+      margin-bottom: 5px;
+      color: #555;
+    }
+
+    select,
+    textarea,
+    input[type="text"],
+    input[type="number"] {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 20px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      font-size: 14px;
+      background-color: #f9f9f9;
+    }
+
+    textarea {
+      resize: vertical;
+    }
+
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      margin-bottom: 20px;
+      font-weight: normal;
+    }
+
+    input[type="checkbox"] {
+      margin-right: 10px;
+      transform: scale(1.2);
+    }
+
+    button {
+      width: 100%;
+      padding: 12px;
+      background: linear-gradient(45deg, #4facfe, #00f2fe);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: transform 0.2s ease, background 0.3s ease;
+    }
+
+    button:hover {
+      background: linear-gradient(45deg, #00dbde, #fc00ff);
+      transform: scale(1.03);
+    }
+
+    pre {
+      background-color: #f9f9f9;
+      padding: 15px;
+      border-radius: 6px;
+      margin-top: 25px;
+      color: #2c3e50;
+      font-size: 13px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    canvas {
+      margin-top: 30px;
+      width: 100% !important;
+      height: 300px !important;
+    }
+
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translateY(40px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .container {
+        padding: 20px;
+      }
+
+      button {
+        font-size: 15px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>Query Benchmark Tool</h1>
+
+    <form id="benchmarkForm">
+      <label for="database">Source Database:</label>
+      <select id="database" name="database" required>
+        <option value="mysql">MySQL</option>
+        <option value="mongodb">MongoDB</option>
+        <option value="postgresql">PostgreSQL</option>
+        <option value="redis">Redis</option>
+      </select>
+
+      <label for="query">Query:</label>
+      <textarea id="query" name="query" rows="4" placeholder="Enter your query here..." required></textarea>
+
+      <label for="query_type">Query Type:</label>
+      <input type="text" id="query_type" name="query_type" placeholder="e.g. SELECT, INSERT, JOIN">
+
+      <div class="checkbox-label">
+        <input type="checkbox" id="parallel" name="parallel">
+        <label for="parallel">Run in Parallel?</label>
+      </div>
+
+      <label for="concurrency">Concurrency Level:</label>
+      <input type="number" id="concurrency" name="concurrency" value="1" min="1">
+
+      <button type="submit">Run Benchmark</button>
+    </form>
+
+    <pre id="results">Results will appear here...</pre>
+
+    <canvas id="timeChart"></canvas>
+    <canvas id="cpuChart"></canvas>
+    <canvas id="memoryChart"></canvas>
+  </div>
+  <script>
+    document.getElementById('benchmarkForm').addEventListener('submit', async function (e) {
+      e.preventDefault();
+
+      const selectedDatabase = document.getElementById('database').value;
+
+      const data = {
+        database: selectedDatabase,  // Add this line
+        query: document.getElementById('query').value,
+        query_type: document.getElementById('query_type').value,
+        parallel: document.getElementById('parallel').checked,
+        concurrency: parseInt(document.getElementById('concurrency').value)
+      };
+
+      const resultsEl = document.getElementById('results');
+      resultsEl.innerText = 'Running benchmark...';
+
+      try {
+        const response = await fetch('/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+
+        if (!response.ok) throw new Error(`Server error: ${response.status}`);
+
+        const result = await response.json();
+        resultsEl.innerText = JSON.stringify(result, null, 4);
+
+        renderCharts(result);
+      } catch (error) {
+        resultsEl.innerText = 'Error: ' + error.message;
+      }
+    });
+
+    let timeChart, cpuChart, memoryChart;
+
+    function renderCharts(result) {
+      const labels = Object.keys(result);
+      const timeData = labels.map(db => result[db]?.execution_time || 0);
+      const cpuData = labels.map(db => result[db]?.cpu_usage || 0);
+      const memData = labels.map(db => result[db]?.memory_usage || 0);
+
+      destroyChart(timeChart);
+      destroyChart(cpuChart);
+      destroyChart(memoryChart);
+
+      timeChart = createBarChart('timeChart', 'Execution Time (seconds)', labels, timeData, '#3498db');
+      cpuChart = createBarChart('cpuChart', 'CPU Usage (%)', labels, cpuData, '#e67e22');
+      memoryChart = createBarChart('memoryChart', 'Memory Usage (bytes)', labels, memData, '#9b59b6');
+    }
+
+    function destroyChart(chart) {
+      if (chart) {
+        chart.destroy();
+      }
+    }
+
+    function createBarChart(canvasId, label, labels, data, color) {
+      return new Chart(document.getElementById(canvasId).getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label,
+            data,
+            backgroundColor: color
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: label }
+            }
+          },
+          plugins: {
+            legend: { display: false }
+          }
+        }
+      });
+    }
+  </script>
+</body>
+
+</html>
